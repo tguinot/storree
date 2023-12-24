@@ -1,3 +1,5 @@
+#!/opt/homebrew/bin/python3
+
 import libtorrent as lt
 import opendht
 import time
@@ -5,28 +7,7 @@ import platform
 import os
 import argparse
 import sqlite3
-
-def create_torrent(file_path):
-    fs = lt.file_storage()
-    lt.add_files(fs, file_path)
-    t = lt.create_torrent(fs)
-    parent_path = os.path.abspath(os.path.dirname(file_path))
-    lt.set_piece_hashes(t, parent_path)
-    torrent = t.generate()
-    torrent_data = lt.bencode(torrent)
-    info = lt.torrent_info(lt.bdecode(torrent_data))
-    return info
-
-
-def start_session():
-    return lt.session({'listen_interfaces': '0.0.0.0:6881', 'enable_dht': True})
-
-
-def add_torrent_to_session(ses, magnet_uri, save_path):
-    p = lt.parse_magnet_uri(magnet_uri)
-    p.save_path = save_path
-    return ses.add_torrent(p)
-    # return ses.add_torrent({'url': magnet_uri, 'save_path': save_path})
+import torrent_utils as tu
 
 
 def publish_to_dht(dht_node, user_id, file_name, magnet_uri):
@@ -79,19 +60,18 @@ def mirror(user_id, filename, path):
 
 
 def store_files(dht_node):
-    ses = start_session()
+    ses = tu.start_session()
     conn = initialize_database()
-    print("Initialized DB")
     c = conn.cursor()
     c.execute("SELECT user, path FROM saved")
     for user, file_path in c.fetchall():
         print("Processing:", user, file_path)
         # Using the file's directory as the save path
-        info = create_torrent(file_path)
+        info = tu.create_torrent(file_path)
         h = ses.add_torrent({'ti': info, 'save_path': os.path.dirname(file_path)})
         magnet_uri = lt.make_magnet_uri(h)
         save_path = os.path.dirname(file_path)
-        handle = add_torrent_to_session(ses, magnet_uri, save_path)
+        handle = tu.add_torrent_to_session(ses, magnet_uri, save_path)
         # Publish to DHT
         publish_to_dht(dht_node, user, os.path.basename(file_path), magnet_uri)
         print(f"Storing {file_path}: {magnet_uri}")
@@ -113,11 +93,7 @@ def new_files(directory, user_id):
     for file in os.listdir(directory):
         file_path = os.path.join(directory, file)
         if os.path.isfile(file_path):
-            ses = lt.session(
-                {'listen_interfaces': '0.0.0.0:6881', 'enable_dht': True})
-            
             file_name = os.path.basename(file_path)
-
             # Insert into the 'saved' table
             c.execute("INSERT INTO saved (user, path, filename) VALUES (?, ?, ?)",
                       (user_id, file_path, file_name))
@@ -131,14 +107,12 @@ def new_files(directory, user_id):
 def clear_terminal():
     pass
     # Clear the terminal screen.
-    #os.system('cls' if platform.system() == 'Windows' else 'clear')
+    os.system('cls' if platform.system() == 'Windows' else 'clear')
 
 
 def initialize_download_session():
     conn = initialize_database()
-    print("Initialized database")
-    ses = start_session()
-    print("Initialized torrent session")
+    ses = tu.start_session()
     return conn, ses
 
 
@@ -168,7 +142,7 @@ def start_downloads(ses, download_data):
     download_handles = []
     for magnet_link, download_path, filename in download_data:
         print("Downloading magnet:", magnet_link)
-        handle = add_torrent_to_session(ses, magnet_link, download_path)
+        handle = tu.add_torrent_to_session(ses, magnet_link, download_path)
         download_handles.append((handle, filename))
     return download_handles
 
